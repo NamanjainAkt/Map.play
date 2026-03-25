@@ -3,9 +3,10 @@ import { StyleSheet, View, Text, TouchableOpacity } from 'react-native';
 import MapView, { Marker, Polyline } from '../../src/components/map/MapView';
 import Joystick from '../../src/components/game/Joystick';
 import Territory from '../../src/components/game/Territory';
-import { useGameStore, createNewPlayer, type Coordinate } from '../../src/stores/gameStore';
+import { useGameStore, createNewPlayer, type Coordinate, type Player } from '../../src/stores/gameStore';
 import { coordinateToTile } from '../../src/utils/grid';
 import { territoryManager } from '../../src/services/TerritoryManager';
+import { useMultiplayer, type MultiplayerPlayer } from '../../src/hooks/useMultiplayer';
 
 const PLAYER_SPEED = 0.00003;
 const TRAIL_INTERVAL_MS = 100;
@@ -20,6 +21,7 @@ export default function GameScreen() {
     longitude: INITIAL_LONGITUDE,
   });
   const [notification, setNotification] = useState<string | null>(null);
+  const [userId] = useState<string | null>(null);
   
   const movementRef = useRef({ x: 0, y: 0 });
   const animationRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -36,8 +38,28 @@ export default function GameScreen() {
     setCurrentTile,
     updateScore,
     setTerritory,
-    addTerritory,
+    setOtherPlayers,
   } = useGameStore();
+
+  const { nearbyPlayers, connectionStatus } = useMultiplayer({
+    currentTile: useGameStore.getState().currentTile,
+    userId,
+    onPlayerJoined: (p) => console.log('Player joined:', p.name),
+    onPlayerLeft: (id) => console.log('Player left:', id),
+  });
+
+  useEffect(() => {
+    setOtherPlayers(nearbyPlayers.map(p => ({
+      id: p.id,
+      name: p.name,
+      color: p.color,
+      position: p.position,
+      trail: p.trail,
+      territory: [],
+      score: p.score,
+      isAlive: p.isAlive,
+    })));
+  }, [nearbyPlayers, setOtherPlayers]);
 
   const handleLocationUpdate = useCallback((lat: number, lng: number) => {
     const newLocation = { latitude: lat, longitude: lng };
@@ -152,6 +174,8 @@ export default function GameScreen() {
     return player.trail;
   }, [player?.trail]);
 
+  const otherPlayersOnMap = useGameStore.getState().otherPlayers;
+
   return (
     <View style={styles.container}>
       <MapView
@@ -179,11 +203,37 @@ export default function GameScreen() {
             )}
           </>
         )}
+
+        {otherPlayersOnMap.map((otherPlayer) => (
+          <React.Fragment key={otherPlayer.id}>
+            <Marker
+              coordinate={otherPlayer.position}
+              title={otherPlayer.name}
+              icon={{
+                color: otherPlayer.color,
+              }}
+            />
+            {otherPlayer.trail.length > 1 && (
+              <Polyline
+                coordinates={otherPlayer.trail}
+                strokeColor={otherPlayer.color}
+                strokeWidth={3}
+                strokeOpacity={0.7}
+              />
+            )}
+          </React.Fragment>
+        ))}
       </MapView>
 
       {notification && (
         <View style={styles.notification}>
           <Text style={styles.notificationText}>{notification}</Text>
+        </View>
+      )}
+
+      {connectionStatus === 'connected' && isPlaying && (
+        <View style={styles.multiplayerStatus}>
+          <Text style={styles.multiplayerText}>🟢 {nearbyPlayers.length} nearby</Text>
         </View>
       )}
 
@@ -312,5 +362,19 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  multiplayerStatus: {
+    position: 'absolute',
+    top: 120,
+    left: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  multiplayerText: {
+    color: '#10B981',
+    fontSize: 12,
+    fontWeight: '600',
   },
 });

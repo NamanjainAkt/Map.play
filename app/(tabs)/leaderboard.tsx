@@ -1,13 +1,6 @@
-import React, { useState } from 'react';
-import { StyleSheet, View, Text, FlatList, TouchableOpacity } from 'react-native';
-
-interface LeaderboardEntry {
-  id: string;
-  name: string;
-  score: number;
-  territory: number;
-  rank: number;
-}
+import React, { useState, useEffect, useCallback } from 'react';
+import { StyleSheet, View, Text, FlatList, TouchableOpacity, RefreshControl, ActivityIndicator } from 'react-native';
+import { useLeaderboard, type LeaderboardEntry } from '../../src/hooks/useLeaderboard';
 
 const MOCK_LEADERBOARD: LeaderboardEntry[] = [
   { id: '1', name: 'ProPlayer', score: 15420, territory: 89, rank: 1 },
@@ -24,6 +17,16 @@ const MOCK_LEADERBOARD: LeaderboardEntry[] = [
 
 export default function LeaderboardScreen() {
   const [selectedPeriod, setSelectedPeriod] = useState<'global' | 'daily' | 'weekly'>('global');
+  const { leaderboard, loading, error, refresh } = useLeaderboard();
+  const [refreshing, setRefreshing] = useState(false);
+
+  const displayData = leaderboard.length > 0 ? leaderboard : MOCK_LEADERBOARD;
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await refresh();
+    setRefreshing(false);
+  }, [refresh]);
 
   const renderItem = ({ item }: { item: LeaderboardEntry }) => (
     <View style={[styles.row, item.rank <= 3 && styles.topThree]}>
@@ -35,6 +38,18 @@ export default function LeaderboardScreen() {
         <Text style={styles.territoryText}>{item.territory} tiles</Text>
       </View>
       <Text style={styles.scoreText}>{item.score.toLocaleString()}</Text>
+    </View>
+  );
+
+  const renderHeader = () => (
+    <View style={styles.headerContainer}>
+      {loading && leaderboard.length === 0 ? (
+        <ActivityIndicator size="large" color="#06b6d4" />
+      ) : error ? (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Using offline data</Text>
+        </View>
+      ) : null}
     </View>
   );
 
@@ -55,10 +70,25 @@ export default function LeaderboardScreen() {
       </View>
 
       <FlatList
-        data={MOCK_LEADERBOARD}
+        data={displayData}
         renderItem={renderItem}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
+        ListHeaderComponent={renderHeader}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#06b6d4"
+            colors={['#06b6d4']}
+          />
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>No players yet</Text>
+            <Text style={styles.emptySubtext}>Be the first to play!</Text>
+          </View>
+        }
       />
     </View>
   );
@@ -94,6 +124,19 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: 16,
+  },
+  headerContainer: {
+    padding: 20,
+    alignItems: 'center',
+  },
+  errorContainer: {
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    padding: 12,
+    borderRadius: 8,
+  },
+  errorText: {
+    color: '#EF4444',
+    textAlign: 'center',
   },
   row: {
     flexDirection: 'row',
@@ -146,5 +189,19 @@ const styles = StyleSheet.create({
     color: '#06b6d4',
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  emptyContainer: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  emptyText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  emptySubtext: {
+    color: '#9CA3AF',
+    fontSize: 14,
+    marginTop: 8,
   },
 });

@@ -16,6 +16,7 @@ const INITIAL_LONGITUDE = -0.1278;
 
 export default function GameScreen() {
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [playerName] = useState('Player1');
   const [currentLocation, setCurrentLocation] = useState<Coordinate>({
     latitude: INITIAL_LATITUDE,
@@ -23,6 +24,7 @@ export default function GameScreen() {
   });
   const [notification, setNotification] = useState<string | null>(null);
   const [userId] = useState<string | null>(null);
+  const gameStatus = useGameStore((state) => state.gameStatus);
   
   const movementRef = useRef({ x: 0, y: 0 });
   const animationRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -89,8 +91,23 @@ export default function GameScreen() {
     setGameStatus('playing');
   }, [player, currentLocation, playerName, setPlayer, setGameStatus]);
 
+  const pauseGame = useCallback(() => {
+    setIsPaused(true);
+    setGameStatus('paused');
+    if (animationRef.current) {
+      clearInterval(animationRef.current);
+      animationRef.current = null;
+    }
+  }, [setGameStatus]);
+
+  const resumeGame = useCallback(() => {
+    setIsPaused(false);
+    setGameStatus('playing');
+  }, [setGameStatus]);
+
   const stopGame = useCallback(() => {
     setIsPlaying(false);
+    setIsPaused(false);
     setGameStatus('menu');
     if (animationRef.current) {
       clearInterval(animationRef.current);
@@ -306,8 +323,20 @@ export default function GameScreen() {
             <Text style={styles.scoreLabel}>TERRITORY</Text>
             <Text style={styles.scoreText}>{player?.territory?.length || 0}</Text>
           </View>
-          <TouchableOpacity style={styles.pauseButton} onPress={stopGame}>
+          <TouchableOpacity style={styles.pauseButton} onPress={pauseGame}>
             <Text style={styles.pauseButtonText}>⏸</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {isPaused && (
+        <View style={styles.pauseContainer}>
+          <Text style={styles.pauseTitle}>Paused</Text>
+          <TouchableOpacity style={styles.resumeButton} onPress={resumeGame}>
+            <Text style={styles.resumeButtonText}>Resume</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.quitButton} onPress={stopGame}>
+            <Text style={styles.quitButtonText}>Quit</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -428,5 +457,41 @@ const styles = StyleSheet.create({
     color: '#10B981',
     fontSize: 12,
     fontWeight: '600',
+  },
+  pauseContainer: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  pauseTitle: {
+    fontSize: 36,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginBottom: 32,
+  },
+  resumeButton: {
+    backgroundColor: '#06b6d4',
+    paddingHorizontal: 48,
+    paddingVertical: 16,
+    borderRadius: 30,
+    marginBottom: 16,
+  },
+  resumeButtonText: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  quitButton: {
+    backgroundColor: '#374151',
+    paddingHorizontal: 48,
+    paddingVertical: 16,
+    borderRadius: 30,
+  },
+  quitButtonText: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: 'bold',
   },
 });

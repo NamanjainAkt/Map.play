@@ -7,6 +7,7 @@ import { useGameStore, createNewPlayer, type Coordinate, type Player } from '../
 import { coordinateToTile } from '../../src/utils/grid';
 import { territoryManager } from '../../src/services/TerritoryManager';
 import { useMultiplayer, type MultiplayerPlayer } from '../../src/hooks/useMultiplayer';
+import { checkHeadToEnemyTrailCollision, checkBoundaryCollision } from '../../src/utils/collision';
 
 const PLAYER_SPEED = 0.00003;
 const TRAIL_INTERVAL_MS = 100;
@@ -39,6 +40,9 @@ export default function GameScreen() {
     updateScore,
     setTerritory,
     setOtherPlayers,
+    killEnemy,
+    killPlayer,
+    respawnPlayer,
   } = useGameStore();
 
   const { nearbyPlayers, connectionStatus } = useMultiplayer({
@@ -116,6 +120,54 @@ export default function GameScreen() {
             latitude: player.position.latitude + movement.y * PLAYER_SPEED,
             longitude: player.position.longitude + movement.x * PLAYER_SPEED,
           };
+          
+          const prevPos = player.position;
+          
+          if (checkBoundaryCollision(newPos)) {
+            showNotification('Boundary reached!');
+            movementRef.current = { x: 0, y: 0 };
+            return;
+          }
+          
+          const otherPlayers = useGameStore.getState().otherPlayers;
+          const enemyTrails = otherPlayers
+            .filter(p => p.isAlive)
+            .map(p => p.trail);
+          
+          if (enemyTrails.length > 0 && player.trail.length > 0) {
+            const collision = checkHeadToEnemyTrailCollision(newPos, prevPos, enemyTrails);
+            
+            if (collision.collided) {
+              const enemy = otherPlayers.find(p => p.trail === enemyTrails[collision.enemyIndex]);
+              if (enemy) {
+                killPlayer(player.id);
+                const bonusScore = Math.floor(enemy.score * 0.5);
+                updateScore(Math.max(0, player.score - bonusScore));
+                showNotification(`You were killed by ${enemy.name}!`);
+                movementRef.current = { x: 0, y: 0 };
+                setTimeout(() => {
+                  respawnPlayer();
+                  showNotification('Respawning...');
+                }, 2000);
+                return;
+              }
+            }
+          }
+          
+          for (const enemy of otherPlayers) {
+            if (!enemy.isAlive || enemy.trail.length < 2) continue;
+            
+            const enemyHead = enemy.trail[enemy.trail.length - 1];
+            const enemyPrev = enemy.trail[enemy.trail.length - 2];
+            
+            if (checkHeadToEnemyTrailCollision(newPos, prevPos, [enemy.trail]).collided) {
+              const bonusScore = Math.floor(enemy.score * 0.3) + 100;
+              killEnemy(enemy.id, bonusScore);
+              showNotification(`You eliminated ${enemy.name}! +${bonusScore} pts`);
+              break;
+            }
+          }
+          
           updatePlayerPosition(newPos);
           
           const now = Date.now();
@@ -167,7 +219,7 @@ export default function GameScreen() {
         clearInterval(animationRef.current);
       }
     };
-  }, [isPlaying, player, updatePlayerPosition, addTrailPoint, setCurrentTile, updateScore, setTerritory, clearTrail, showNotification]);
+  }, [isPlaying, player, updatePlayerPosition, addTrailPoint, setCurrentTile, updateScore, setTerritory, clearTrail, showNotification, killEnemy, killPlayer, respawnPlayer]);
 
   const trailCoordinates = useMemo(() => {
     if (!player || player.trail.length === 0) return [];

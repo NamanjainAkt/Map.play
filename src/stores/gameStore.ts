@@ -34,7 +34,11 @@ interface GameState {
   setCurrentTile: (tile: { x: number; y: number }) => void;
   setOtherPlayers: (players: Player[]) => void;
   killPlayer: (playerId: string) => void;
+  killEnemy: (enemyId: string, bonusScore: number) => void;
   respawnPlayer: () => void;
+  addKillNotification: (message: string) => void;
+  notifications: string[];
+  clearNotifications: () => void;
 }
 
 const generatePlayerId = () => Math.random().toString(36).substring(2, 15);
@@ -57,6 +61,7 @@ export const useGameStore = create<GameState>((set) => ({
   otherPlayers: [],
   gameStatus: 'menu',
   currentTile: null,
+  notifications: [],
 
   setPlayer: (player) => set({ player }),
   
@@ -112,6 +117,16 @@ export const useGameStore = create<GameState>((set) => ({
       };
     }),
 
+  killEnemy: (enemyId, bonusScore) =>
+    set((state) => ({
+      otherPlayers: state.otherPlayers.map((p) =>
+        p.id === enemyId ? { ...p, isAlive: false } : p
+      ),
+      player: state.player
+        ? { ...state.player, score: state.player.score + bonusScore }
+        : null,
+    })),
+
   respawnPlayer: () =>
     set((state) => ({
       player: state.player
@@ -123,6 +138,13 @@ export const useGameStore = create<GameState>((set) => ({
           }
         : null,
     })),
+
+  addKillNotification: (message) =>
+    set((state) => ({
+      notifications: [...state.notifications, message],
+    })),
+
+  clearNotifications: () => set({ notifications: [] }),
 }));
 
 export const createNewPlayer = (name: string, startPosition: Coordinate): Player => ({

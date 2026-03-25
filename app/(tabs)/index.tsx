@@ -2,8 +2,10 @@ import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { StyleSheet, View, Text, TouchableOpacity } from 'react-native';
 import MapView, { Marker, Polyline } from '../../src/components/map/MapView';
 import Joystick from '../../src/components/game/Joystick';
+import Territory from '../../src/components/game/Territory';
 import { useGameStore, createNewPlayer, type Coordinate } from '../../src/stores/gameStore';
-import { coordinateToTile, calculateDistance } from '../../src/utils/grid';
+import { coordinateToTile } from '../../src/utils/grid';
+import { territoryManager } from '../../src/services/TerritoryManager';
 
 const PLAYER_SPEED = 0.00003;
 const TRAIL_INTERVAL_MS = 100;
@@ -17,10 +19,12 @@ export default function GameScreen() {
     latitude: INITIAL_LATITUDE,
     longitude: INITIAL_LONGITUDE,
   });
+  const [notification, setNotification] = useState<string | null>(null);
   
   const movementRef = useRef({ x: 0, y: 0 });
   const animationRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastTrailTime = useRef<number>(0);
+  const wasOnTerritory = useRef<boolean>(true);
   
   const {
     player,
@@ -31,6 +35,8 @@ export default function GameScreen() {
     setGameStatus,
     setCurrentTile,
     updateScore,
+    setTerritory,
+    addTerritory,
   } = useGameStore();
 
   const handleLocationUpdate = useCallback((lat: number, lng: number) => {
@@ -42,6 +48,7 @@ export default function GameScreen() {
       setPlayer(newPlayer);
       const tile = coordinateToTile(lat, lng);
       setCurrentTile(tile);
+      wasOnTerritory.current = true;
     }
   }, [player, isPlaying, playerName, setPlayer, setCurrentTile]);
 
@@ -51,6 +58,7 @@ export default function GameScreen() {
       const newPlayer = createNewPlayer(playerName, startPosition);
       setPlayer(newPlayer);
     }
+    wasOnTerritory.current = true;
     setIsPlaying(true);
     setGameStatus('playing');
   }, [player, currentLocation, playerName, setPlayer, setGameStatus]);
@@ -70,6 +78,11 @@ export default function GameScreen() {
 
   const handleJoystickStop = useCallback(() => {
     movementRef.current = { x: 0, y: 0 };
+  }, []);
+
+  const showNotification = useCallback((message: string) => {
+    setNotification(message);
+    setTimeout(() => setNotification(null), 2000);
   }, []);
 
   useEffect(() => {
@@ -92,12 +105,37 @@ export default function GameScreen() {
             if (tile.x !== player.position.latitude || tile.y !== player.position.longitude) {
               setCurrentTile(tile);
             }
+
+            const onOwnTerritory = territoryManager.isOnOwnTerritory(newPos, player.territory);
             
-            const score = Math.floor(calculateDistance(
-              player.territory[0]?.[0] || player.position,
-              newPos
-            ) * 1000);
-            updateScore(score);
+            if (wasOnTerritory.current && !onOwnTerritory) {
+              wasOnTerritory.current = false;
+            }
+            
+            if (!wasOnTerritory.current && onOwnTerritory && player.trail.length > 10) {
+              const loopPolygon = territoryManager.detectLoop(player.trail, player.territory);
+              
+              if (loopPolygon) {
+                const newTerritory = territoryManager.captureTerritory(loopPolygon, player.territory);
+                const mergedTerritory = territoryManager.mergeTerritories(newTerritory);
+                setTerritory(mergedTerritory);
+                
+                const newScore = territoryManager.calculateTerritoryScore(mergedTerritory);
+                updateScore(newScore);
+                
+                const capturedCount = mergedTerritory.length - player.territory.length;
+                if (capturedCount > 0) {
+                  showNotification(`+${capturedCount} tiles captured!`);
+                }
+                
+                clearTrail();
+                wasOnTerritory.current = true;
+              }
+            }
+            
+            if (onOwnTerritory) {
+              wasOnTerritory.current = true;
+            }
           }
         }
       }, 16);
@@ -107,7 +145,7 @@ export default function GameScreen() {
         clearInterval(animationRef.current);
       }
     };
-  }, [isPlaying, player, updatePlayerPosition, addTrailPoint, setCurrentTile, updateScore]);
+  }, [isPlaying, player, updatePlayerPosition, addTrailPoint, setCurrentTile, updateScore, setTerritory, clearTrail, showNotification]);
 
   const trailCoordinates = useMemo(() => {
     if (!player || player.trail.length === 0) return [];
@@ -124,6 +162,7 @@ export default function GameScreen() {
       >
         {player && (
           <>
+            <Territory polygons={player.territory} color={player.color} />
             <Marker
               coordinate={player.position}
               title={player.name}
@@ -141,6 +180,12 @@ export default function GameScreen() {
           </>
         )}
       </MapView>
+
+      {notification && (
+        <View style={styles.notification}>
+          <Text style={styles.notificationText}>{notification}</Text>
+        </View>
+      )}
 
       {isPlaying && player && (
         <Joystick
@@ -248,5 +293,24 @@ const styles = StyleSheet.create({
   },
   pauseButtonText: {
     fontSize: 20,
+  },
+  notification: {
+    position: 'absolute',
+    top: 120,
+    alignSelf: 'center',
+    backgroundColor: '#10B981',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  notificationText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });

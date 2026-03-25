@@ -1,17 +1,26 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity } from 'react-native';
 import MapView, { Marker, Polyline } from '../../src/components/map/MapView';
 import Joystick from '../../src/components/game/Joystick';
 import { useGameStore, createNewPlayer, type Coordinate } from '../../src/stores/gameStore';
-import { coordinateToTile } from '../../src/utils/grid';
+import { coordinateToTile, calculateDistance } from '../../src/utils/grid';
 
-const PLAYER_SPEED = 0.0001; // degrees per tick
+const PLAYER_SPEED = 0.00003;
+const TRAIL_INTERVAL_MS = 100;
+const INITIAL_LATITUDE = 51.5074;
+const INITIAL_LONGITUDE = -0.1278;
 
 export default function GameScreen() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [playerName] = useState('Player1');
+  const [currentLocation, setCurrentLocation] = useState<Coordinate>({
+    latitude: INITIAL_LATITUDE,
+    longitude: INITIAL_LONGITUDE,
+  });
+  
   const movementRef = useRef({ x: 0, y: 0 });
   const animationRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastTrailTime = useRef<number>(0);
   
   const {
     player,
@@ -20,20 +29,31 @@ export default function GameScreen() {
     clearTrail,
     setPlayer,
     setGameStatus,
-    gameStatus,
+    setCurrentTile,
+    updateScore,
   } = useGameStore();
 
   const handleLocationUpdate = useCallback((lat: number, lng: number) => {
+    const newLocation = { latitude: lat, longitude: lng };
+    setCurrentLocation(newLocation);
+    
     if (!player && isPlaying) {
-      const newPlayer = createNewPlayer(playerName, { latitude: lat, longitude: lng });
+      const newPlayer = createNewPlayer(playerName, newLocation);
       setPlayer(newPlayer);
+      const tile = coordinateToTile(lat, lng);
+      setCurrentTile(tile);
     }
-  }, [player, isPlaying, playerName, setPlayer]);
+  }, [player, isPlaying, playerName, setPlayer, setCurrentTile]);
 
   const startGame = useCallback(() => {
+    const startPosition = player?.position || currentLocation;
+    if (!player) {
+      const newPlayer = createNewPlayer(playerName, startPosition);
+      setPlayer(newPlayer);
+    }
     setIsPlaying(true);
     setGameStatus('playing');
-  }, [setGameStatus]);
+  }, [player, currentLocation, playerName, setPlayer, setGameStatus]);
 
   const stopGame = useCallback(() => {
     setIsPlaying(false);
@@ -43,6 +63,14 @@ export default function GameScreen() {
       animationRef.current = null;
     }
   }, [setGameStatus]);
+
+  const handleJoystickMove = useCallback((data: { x: number; y: number }) => {
+    movementRef.current = { x: data.x, y: -data.y };
+  }, []);
+
+  const handleJoystickStop = useCallback(() => {
+    movementRef.current = { x: 0, y: 0 };
+  }, []);
 
   useEffect(() => {
     if (isPlaying && player) {
@@ -54,31 +82,44 @@ export default function GameScreen() {
             longitude: player.position.longitude + movement.x * PLAYER_SPEED,
           };
           updatePlayerPosition(newPos);
-          addTrailPoint(newPos);
+          
+          const now = Date.now();
+          if (now - lastTrailTime.current > TRAIL_INTERVAL_MS) {
+            lastTrailTime.current = now;
+            addTrailPoint(newPos);
+            
+            const tile = coordinateToTile(newPos.latitude, newPos.longitude);
+            if (tile.x !== player.position.latitude || tile.y !== player.position.longitude) {
+              setCurrentTile(tile);
+            }
+            
+            const score = Math.floor(calculateDistance(
+              player.territory[0]?.[0] || player.position,
+              newPos
+            ) * 1000);
+            updateScore(score);
+          }
         }
-      }, 50);
+      }, 16);
     }
     return () => {
       if (animationRef.current) {
         clearInterval(animationRef.current);
       }
     };
-  }, [isPlaying, player, updatePlayerPosition, addTrailPoint]);
+  }, [isPlaying, player, updatePlayerPosition, addTrailPoint, setCurrentTile, updateScore]);
 
-  const handleJoystickMove = useCallback((data: { x: number; y: number }) => {
-    movementRef.current = { x: data.x, y: -data.y };
-  }, []);
-
-  const handleJoystickStop = useCallback(() => {
-    movementRef.current = { x: 0, y: 0 };
-  }, []);
+  const trailCoordinates = useMemo(() => {
+    if (!player || player.trail.length === 0) return [];
+    return player.trail;
+  }, [player?.trail]);
 
   return (
     <View style={styles.container}>
       <MapView
         onLocationUpdate={handleLocationUpdate}
-        initialLatitude={51.5074}
-        initialLongitude={-0.1278}
+        initialLatitude={INITIAL_LATITUDE}
+        initialLongitude={INITIAL_LONGITUDE}
         initialZoom={16}
       >
         {player && (
@@ -90,11 +131,11 @@ export default function GameScreen() {
                 color: player.color,
               }}
             />
-            {player.trail.length > 1 && (
+            {trailCoordinates.length > 1 && (
               <Polyline
-                coordinates={player.trail}
+                coordinates={trailCoordinates}
                 strokeColor={player.color}
-                strokeWidth={3}
+                strokeWidth={4}
               />
             )}
           </>
@@ -110,7 +151,14 @@ export default function GameScreen() {
 
       {isPlaying && (
         <View style={styles.scoreContainer}>
-          <Text style={styles.scoreText}>Score: {player?.score || 0}</Text>
+          <View style={styles.scoreBox}>
+            <Text style={styles.scoreLabel}>SCORE</Text>
+            <Text style={styles.scoreText}>{player?.score || 0}</Text>
+          </View>
+          <View style={styles.scoreBox}>
+            <Text style={styles.scoreLabel}>TERRITORY</Text>
+            <Text style={styles.scoreText}>{player?.territory?.length || 0}</Text>
+          </View>
           <TouchableOpacity style={styles.pauseButton} onPress={stopGame}>
             <Text style={styles.pauseButtonText}>⏸</Text>
           </TouchableOpacity>
@@ -136,7 +184,7 @@ const styles = StyleSheet.create({
   },
   menuContainer: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
@@ -171,16 +219,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 8,
   },
-  scoreText: {
+  scoreBox: {
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    color: '#FFFFFF',
     paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 20,
-    fontSize: 18,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  scoreLabel: {
+    color: '#9CA3AF',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  scoreText: {
+    color: '#FFFFFF',
+    fontSize: 20,
     fontWeight: 'bold',
-    overflow: 'hidden',
   },
   pauseButton: {
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
